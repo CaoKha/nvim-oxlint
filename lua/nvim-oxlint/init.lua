@@ -1,3 +1,7 @@
+--- referenced from https://github.com/esmuellert/nvim-eslint/blob/main/lua/nvim-eslint/init.lua
+--- https://github.com/oxc-project/coc-oxc/blob/main/src/index.ts
+--- https://github.com/oxc-project/oxc/blob/main/crates/oxc_language_server/README.md
+
 local M = {}
 
 --- Writes to error buffer.
@@ -8,8 +12,9 @@ local function err_message(...)
 end
 
 --- @return string | nil
-local function local_binary_path()
-	local path = vim.fn.getcwd() .. "/.node_modules/oxc_language_server"
+function M.find_binary(bufnr)
+	local path = M.resolve_git_dir(bufnr) .. "/node_modules/.bin/oxc_language_server"
+
 	if vim.loop.fs_stat(path) then
 		return path
 	end
@@ -17,13 +22,10 @@ local function local_binary_path()
 	return nil
 end
 
---- @return string|nil
-local function find_global_binary_path(binary_name)
-	local path = vim.fn.exepath(binary_name)
-	if path == "" then
-		return nil -- Binary not found
-	end
-	return path
+function M.resolve_git_dir(bufnr)
+	local markers = { ".git" }
+	local git_dir = vim.fs.root(bufnr, markers)
+	return git_dir
 end
 
 local oxlint_config_files = {
@@ -44,19 +46,40 @@ function M.check_config_presence()
 	return false
 end
 
-function M.make_settings(user_config)
-	return {
-		run = user_config.run or "onType",
-		enable = user_config.enable or true,
-		config_path = user_config.config_path or ".oxlintrc.json",
+function M.make_settings(buffer)
+	local settings_with_function = {
+		run = M.user_config.run or "onType",
+		enable = M.user_config.enable or true,
+		config_path = M.user_config.config_path or ".oxlintrc.json",
+		workingDirectory = { mode = "location" },
+		workspaceFolder = function(bufnr)
+			local git_dir = M.resolve_git_dir(bufnr)
+			return {
+				uri = vim.uri_from_fname(git_dir),
+				name = vim.fn.fnamemodify(git_dir, ":t"),
+			}
+		end,
 	}
+
+	local flattened_settings = {}
+	for k, v in pairs(settings_with_function) do
+		if type(v) == "function" then
+			flattened_settings[k] = v(buffer)
+		else
+			flattened_settings[k] = v
+		end
+	end
+
+	return flattened_settings
 end
 
-function M.lsp_start(user_config)
-	local lsp_cmd = user_config.bin_path or local_binary_path()
+function M.make_client_capabilities()
+	local default_capabilities = vim.lsp.protocol.make_client_capabilities()
+	default_capabilities.workspace.didChangeConfiguration.dynamicRegistration = true
+	return default_capabilities
+end
 
-	vim.notify(lsp_cmd)
-
+function M.lsp_start()
 	vim.api.nvim_create_autocmd("FileType", {
 		pattern = vim.tbl_extend("force", {
 			"javascript",
@@ -65,16 +88,16 @@ function M.lsp_start(user_config)
 			"typescript",
 			"typescriptreact",
 			"typescript.tsx",
-			"vue",
-			"svelte",
-			"astro",
 		}, M.user_config.filetypes or {}),
 		callback = function(args)
+			local lsp_cmd = M.user_config.bin_path or M.find_binary(args.buf)
+
 			vim.lsp.start({
-				name = "oxlint",
+				name = "oxc",
 				cmd = lsp_cmd,
 				settings = M.make_settings(args.buf),
-				capabilities = user_config.capabilities,
+				root_dir = M.user_config.root_dir and M.user_config.root_dir(args.buf) or M.resolve_git_dir(args.buf),
+				capabilities = M.user_config.capabilities or M.make_client_capabilities(),
 				handlers = vim.tbl_deep_extend("keep", M.user_config.handlers or {}, {
 					["workspace/didChangeConfiguration"] = function(_, result, ctx)
 						local function lookup_section(table, section)
@@ -97,7 +120,7 @@ function M.lsp_start(user_config)
 						end
 
 						--- Insert custom logic to update client settings
-						local new_settings = M.make_settings(user_config)
+						local new_settings = M.make_settings(args.buf)
 						client.settings = new_settings
 						--- end custom logic
 
@@ -125,8 +148,12 @@ function M.lsp_start(user_config)
 end
 
 function M.setup(user_config)
+	if user_config then
+		M.user_config = user_config
+	end
+
 	if M.check_config_presence() then
-		M.lsp_start(user_config)
+		M.lsp_start()
 	end
 end
 
