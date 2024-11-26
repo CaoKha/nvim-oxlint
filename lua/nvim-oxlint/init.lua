@@ -11,12 +11,12 @@ local function err_message(...)
 	vim.api.nvim_command("redraw")
 end
 
---- @return string | nil
+--- @return table| nil
 function M.find_binary(bufnr)
 	local path = M.resolve_git_dir(bufnr) .. "/node_modules/.bin/oxc_language_server"
 
 	if vim.loop.fs_stat(path) then
-		return path
+		return { path }
 	end
 
 	return nil
@@ -50,7 +50,7 @@ function M.make_settings(buffer)
 	local settings_with_function = {
 		run = M.user_config.run or "onType",
 		enable = M.user_config.enable or true,
-		config_path = M.user_config.config_path or ".oxlintrc.json",
+		configPath = M.user_config.config_path or ".oxlintrc.json",
 		workingDirectory = { mode = "location" },
 		workspaceFolder = function(bufnr)
 			local git_dir = M.resolve_git_dir(bufnr)
@@ -62,6 +62,7 @@ function M.make_settings(buffer)
 	}
 
 	local flattened_settings = {}
+
 	for k, v in pairs(settings_with_function) do
 		if type(v) == "function" then
 			flattened_settings[k] = v(buffer)
@@ -92,12 +93,20 @@ function M.lsp_start()
 		callback = function(args)
 			local lsp_cmd = M.user_config.bin_path or M.find_binary(args.buf)
 
+			local settings = M.make_settings(args.buf)
+
 			vim.lsp.start({
 				name = "oxc",
 				cmd = lsp_cmd,
-				settings = M.make_settings(args.buf),
+				settings = settings,
+				-- INFO: we need this to make server start with correct params
+				-- https://github.com/oxc-project/oxc/blob/main/crates/oxc_language_server/src/main.rs#L89-L95
+				init_options = { settings = settings },
 				root_dir = M.user_config.root_dir and M.user_config.root_dir(args.buf) or M.resolve_git_dir(args.buf),
 				capabilities = M.user_config.capabilities or M.make_client_capabilities(),
+				on_init = function()
+					vim.notify("OXC LSP started", vim.log.levels.INFO)
+				end,
 				handlers = vim.tbl_deep_extend("keep", M.user_config.handlers or {}, {
 					["workspace/didChangeConfiguration"] = function(_, result, ctx)
 						local function lookup_section(table, section)
@@ -107,6 +116,7 @@ function M.lsp_start()
 
 						local client_id = ctx.client_id
 						local client = vim.lsp.get_client_by_id(client_id)
+
 						if not client then
 							err_message(
 								"LSP[",
