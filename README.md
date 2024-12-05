@@ -7,8 +7,8 @@
 - https://github.com/oxc-project/oxc/blob/main/crates/oxc_language_server/README.md
 
 ## installation
-- lazy
-```
+### with Lazy.nvim
+```lua
 {
   "soulsam480/nvim-oxlint",
   opts = {}
@@ -19,14 +19,13 @@
 - same config as https://github.com/oxc-project/coc-oxc#configurations
 - filetypes <- trigger
 ```lua
---- default
 {
-			"javascript",
-			"javascriptreact",
-			"javascript.jsx",
-			"typescript",
-			"typescriptreact",
-			"typescript.tsx",
+  "javascript",
+  "javascriptreact",
+  "javascript.jsx",
+  "typescript",
+  "typescriptreact",
+  "typescript.tsx",
 }
 ```
 - root_dir <- default is `.git` parent
